@@ -64,19 +64,54 @@ class Address(object):
             assert is_integer(tcp_port)
             self.udp_port = udp_port
             self.tcp_port = tcp_port
+
+        # `ip` could be in binary or ascii format, independent of
+        # from_binary's truthy. We use ad-hoc regexp to determin format in
+        # python 2.
+        _ip = ip if PY3 or not ip_pattern.match(ip) else unicode(ip)
+        try:
+            self._ip = Address.parse_ip(_ip)
+        except ipaddress.AddressValueError:
+            try:
+                self._ip = Address.parse_hostname(_ip)
+            except ipaddress.AddressValueError as e:
+                log.debug("failed to parse ip", error=e, ip=ip)
+                raise e
+
+    @property
+    def ip(self):
+        return str(self._ip)
+
+    @staticmethod
+    def parse_hostname(hostname):
+        """
+        Try resolving a hostname.
+        """
+	# We only want v4 or v6 addresses
+	# see https://docs.python.org/2/library/socket.html#socket.getaddrinfo
+	ips = [
+	    str(ai[4][0]) if PY3 else unicode(ai[4][0])
+	    for ai in gevent.socket.getaddrinfo(hostname, None)
+	    if ai[0] == AF_INET
+		or (ai[0] == AF_INET6 and ai[4][3] == 0)
+	]
+	# Arbitrarily choose the first of the resolved addresses
+	return ipaddress.ip_address(ips[0])
+
+    @staticmethod
+    def parse_ip(ip):
+        """
+        Parses the IP and returns a IPv4Address or IPv6Address object
+        """
         try:
             # `ip` could be in binary or ascii format, independent of
             # from_binary's truthy. We use ad-hoc regexp to determin format in
             # python 2.
             _ip = ip if PY3 or not ip_pattern.match(ip) else unicode(ip)
-            self._ip = ipaddress.ip_address(_ip)
+            return ipaddress.ip_address(_ip)
         except ipaddress.AddressValueError as e:
             log.debug("failed to parse ip", error=e, ip=ip)
             raise e
-
-    @property
-    def ip(self):
-        return str(self._ip)
 
     def update(self, addr):
         if not self.tcp_port:
